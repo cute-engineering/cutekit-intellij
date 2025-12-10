@@ -1,34 +1,18 @@
 # Cutekit Integration
 
-A CLion/IntelliJ Platform plugin that surfaces CuteKit extern dependencies inside a dedicated tool window. The plugin discovers CuteKit projects by looking for `project` and `project.lock` manifests and walks through nested extern directories to present a consolidated tree of dependencies declared across the workspace.
+CLion plugin exposing the CuteKit Explorer tool window to browse project roots and extern checkouts in one tree.
 
 ## Features
 
-- Tool window (**CuteKit Explorer**) docked to the right side of the IDE.
-- Directory tree spanning the project root and each extern, exposing full file hierarchies with native CLion actions (open, navigation, refactors, etc.).
-- On-demand refresh plus automatic updates when CuteKit manifests change.
-- Clean presentation that focuses on extern identifiers while keeping the tree easy to scan.
+- CuteKit Explorer tool window docked to the right.
+- Combined project and extern tree with native CLion file actions.
+- Manual refresh plus automatic updates on CuteKit manifest changes.
 
-## Building
-
-```bash
-./gradlew build
-```
-
-Gradle automatically downloads a compatible toolchain (JDK 21 for compilation) and produces the plugin artifact in `build/distributions`.
-
-## Running in CLion
-
-Use the Gradle run configuration provided by the IntelliJ Platform Gradle plugin:
+## Usage
 
 ```bash
-./gradlew runIde
+./gradlew build      # assemble the plugin
+./gradlew runIde     # launch a sandboxed CLion with the plugin
 ```
 
-This launches a sandboxed CLion instance with the plugin preinstalled.
-
-## Development Notes
-
-- Kotlin sources live under `src/main/kotlin`.
-- Plugin descriptors are under `src/main/resources/META-INF`.
-- The dependency collector intentionally prefers lockfiles to avoid evaluating CuteKit macros at build time. If no lockfile is available, it falls back to the project manifest.
+Sources live in `src/main/kotlin`, descriptors in `src/main/resources/META-INF`.

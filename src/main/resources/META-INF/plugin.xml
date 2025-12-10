@@ -3,7 +3,7 @@
     <name>Cutekit Integration</name>
     <vendor email="oss@cute.engineering" url="https://cute.engineering">Cute Engineering</vendor>
     <description><![CDATA[
-        Provides the CuteKit Explorer tool window in CLion to visualize CuteKit externs alongside the project tree, with full access to standard file actions.
+        Adds the CuteKit Explorer tool window for browsing CuteKit projects and externs.
     ]]></description>
 
     <depends>com.intellij.modules.clion</depends>
