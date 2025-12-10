@@ -1,10 +1,17 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
-    kotlin("jvm") version "1.9.21"
-    id("org.jetbrains.intellij") version "1.17.3"
+    kotlin("jvm") version "2.2.0"
+    id("org.jetbrains.intellij.platform") version "2.7.0"
 }
 
 group = "engineering.cute"
 version = "0.1.0"
+
+kotlin {
+    jvmToolchain(21)
+}
 
 java {
     toolchain {
@@ -12,43 +19,44 @@ java {
     }
 }
 
+repositories {
+    mavenCentral()
+
+    intellijPlatform {
+        defaultRepositories()
+    }
+}
+
 dependencies {
     implementation("org.json:json:20240303")
     testImplementation(kotlin("test"))
+
+    intellijPlatform {
+        clion("2025.3")
+        bundledPlugin("com.intellij.clion")
+    }
 }
 
-repositories {
-    mavenCentral()
-}
+intellijPlatform {
+    buildSearchableOptions = false
 
-intellij {
-    version.set("2024.2")
-    type.set("CL")
-    plugins.set(listOf("com.intellij.clion"))
-}
-
-kotlin {
-    jvmToolchain(21)
+    pluginConfiguration {
+        ideaVersion {
+            sinceBuild = "253"
+            untilBuild = provider { null }
+        }
+    }
 }
 
 tasks {
-    withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        kotlinOptions {
-            jvmTarget = "17"
-            freeCompilerArgs = freeCompilerArgs + "-Xjvm-default=all"
+    withType<KotlinCompile>().configureEach {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+            freeCompilerArgs.add("-Xjvm-default=all")
         }
     }
 
-    withType<org.gradle.api.tasks.compile.JavaCompile> {
+    withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
         options.release.set(17)
-    }
-
-    patchPluginXml {
-        sinceBuild.set("242")
-        untilBuild.set("")
-    }
-
-    buildSearchableOptions {
-        enabled = false
     }
 }

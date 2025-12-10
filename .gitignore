@@ -4,3 +4,5 @@ build/
 out/
 .idea/
 .DS_Store
+.intellijPlatform/
+.kotlin/

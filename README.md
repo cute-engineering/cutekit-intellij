@@ -1,6 +1,6 @@
 # Cutekit Integration
 
-CLion plugin exposing the CuteKit Explorer tool window to browse project roots and extern checkouts in one tree.
+CLion 2025.3 plugin exposing the CuteKit Explorer tool window to browse project roots and extern checkouts in one tree.
 
 ## Features
 
