@@ -19,7 +19,10 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.VFileCopyEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent
+import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.ColoredTreeCellRenderer
@@ -39,12 +42,14 @@ import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiManager
 import java.awt.BorderLayout
 import java.awt.event.MouseEvent
+import java.nio.file.InvalidPathException
+import java.nio.file.Paths
 import javax.swing.JComponent
 import javax.swing.JScrollPane
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
-import javax.swing.tree.TreeSelectionModel
 import javax.swing.tree.TreePath
+import javax.swing.tree.TreeSelectionModel
 import kotlin.io.path.pathString
 
 class CutekitDependenciesToolWindowFactory : ToolWindowFactory {
@@ -62,6 +67,8 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
         override fun getData(dataId: String): Any? = this@CutekitDependenciesPanel.getData(dataId)
     }
     private val connection: MessageBusConnection = project.messageBus.connect(this)
+    @Volatile
+    private var observedRootPaths: Set<String> = emptySet()
 
     val component: JComponent = buildUi()
 
@@ -172,6 +179,7 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
                     tree.emptyText.clear()
                 }
 
+                observedRootPaths = computeObservedRootPaths(dependencies)
                 restoreTreeState(previousState)
                 if (previousState.expandedKeys.isEmpty()) {
                     TreeUtil.expand(tree, 1)
@@ -186,12 +194,19 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
     }
 
     private fun shouldRefreshOnEvent(event: VFileEvent): Boolean {
-        val file = event.file ?: return false
-        if (file.name == "project" || file.name == "project.lock") {
-            return true
+        val candidatePaths = collectCandidatePaths(event)
+        if (candidatePaths.isEmpty()) {
+            return false
         }
-        val path = file.path
-        return path.contains("/.cutekit/extern/")
+
+        val roots = observedRootPaths
+        if (roots.isEmpty()) {
+            return false
+        }
+
+        return candidatePaths.any { path ->
+            roots.any { root -> isPathUnderRoot(path, root) }
+        }
     }
 
     private fun buildTree(dependencies: List<CutekitDependency>): DefaultMutableTreeNode {
@@ -433,6 +448,80 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
         val selectedKeys: Set<String>
     ) {
         fun isEmpty(): Boolean = expandedKeys.isEmpty() && selectedKeys.isEmpty()
+    }
+
+    private fun computeObservedRootPaths(dependencies: List<CutekitDependency>): Set<String> {
+        val roots = mutableSetOf<String>()
+        project.basePath
+            ?.let(::normalizePathOrNull)
+            ?.let(roots::add)
+
+        dependencies.forEach { dependency ->
+            dependency.contentRoot
+                ?.let { normalizePathOrNull(it.toAbsolutePath().normalize().toString()) }
+                ?.let(roots::add)
+        }
+
+        return roots
+    }
+
+    private fun collectCandidatePaths(event: VFileEvent): Set<String> {
+        val paths = linkedSetOf<String>()
+
+        normalizePathOrNull(event.path)?.let(paths::add)
+        event.file?.path?.let { filePath ->
+            normalizePathOrNull(filePath)?.let(paths::add)
+        }
+
+        when (event) {
+            is VFileMoveEvent -> {
+                event.newParent?.path?.let { parent ->
+                    val name = event.file.name
+                    normalizePathOrNull(Paths.get(parent, name).toString())?.let(paths::add)
+                }
+            }
+
+            is VFileCopyEvent -> {
+                event.newParent?.path?.let { parent ->
+                    normalizePathOrNull(Paths.get(parent, event.newChildName).toString())?.let(paths::add)
+                }
+            }
+
+            is VFilePropertyChangeEvent -> {
+                if (VirtualFile.PROP_NAME == event.propertyName) {
+                    val parent = event.file?.parent?.path
+                    if (parent != null) {
+                        (event.newValue as? String)
+                            ?.let { normalizePathOrNull(Paths.get(parent, it).toString()) }
+                            ?.let(paths::add)
+                        (event.oldValue as? String)
+                            ?.let { normalizePathOrNull(Paths.get(parent, it).toString()) }
+                            ?.let(paths::add)
+                    }
+                }
+            }
+        }
+
+        return paths
+    }
+
+    private fun normalizePathOrNull(rawPath: String?): String? {
+        if (rawPath.isNullOrBlank()) return null
+        return try {
+            val normalized = Paths.get(rawPath).toAbsolutePath().normalize().toString().trimEnd('/', '\\')
+            if (normalized.isEmpty()) "/" else normalized
+        } catch (_: InvalidPathException) {
+            null
+        }
+    }
+
+    private fun isPathUnderRoot(path: String, root: String): Boolean {
+        if (root == "/") return true
+        if (path == root) return true
+        if (!path.startsWith(root)) return false
+        if (path.length == root.length) return true
+        val separator = path[root.length]
+        return separator == '/' || separator == '\\'
     }
 }
 
