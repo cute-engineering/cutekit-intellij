@@ -11,6 +11,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.DataSink
@@ -303,11 +304,13 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
             sink.lazyNull(CommonDataKeys.NAVIGATABLE_ARRAY)
         }
 
-        val psiElementsLazy = lazy(LazyThreadSafetyMode.NONE) { selectedPsiElements(selectedFiles) }
+        val psiElementsLazy = lazy(LazyThreadSafetyMode.PUBLICATION) {
+            selectedPsiElements(selectedFiles).toTypedArray()
+        }
 
         sink.lazy(LangDataKeys.PSI_ELEMENT_ARRAY) {
             val psiElements = psiElementsLazy.value
-            if (psiElements.isEmpty()) null else psiElements.toTypedArray()
+            if (psiElements.isEmpty()) null else psiElements
         }
 
         sink.lazy(LangDataKeys.PSI_ELEMENT) {
@@ -315,7 +318,7 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
         }
 
         sink.lazy(LangDataKeys.IDE_VIEW) {
-            val directories = buildTargetDirectories(psiElementsLazy.value)
+            val directories = buildTargetDirectories(psiElementsLazy.value.toList())
             if (directories.isEmpty()) return@lazy null
             object : IdeView {
                 override fun getDirectories(): Array<PsiDirectory> = directories.toTypedArray()
@@ -340,20 +343,25 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
         sink.set(PlatformDataKeys.CUT_PROVIDER, copyPasteDelegator.cutProvider)
         sink.set(PlatformDataKeys.PASTE_PROVIDER, copyPasteDelegator.pasteProvider)
 
-        sink.lazy(PlatformDataKeys.DELETE_ELEMENT_PROVIDER) {
-            object : DeleteProvider {
+        if (selectedFiles.isEmpty()) {
+            sink.lazyNull(PlatformDataKeys.DELETE_ELEMENT_PROVIDER)
+        } else {
+            val deleteProvider = object : DeleteProvider {
                 override fun deleteElement(dataContext: DataContext) {
-                    val elements = LangDataKeys.PSI_ELEMENT_ARRAY.getData(dataContext) ?: return
+                    val elements = psiElementsLazy.value
                     if (elements.isEmpty()) return
                     if (!DeleteHandler.shouldEnableDeleteAction(elements)) return
                     DeleteHandler.deletePsiElement(elements, project)
                 }
 
                 override fun canDeleteElement(dataContext: DataContext): Boolean {
-                    val elements = LangDataKeys.PSI_ELEMENT_ARRAY.getData(dataContext)
-                    return elements != null && elements.isNotEmpty() && DeleteHandler.shouldEnableDeleteAction(elements)
+                    val elements = psiElementsLazy.value
+                    return elements.isNotEmpty() && DeleteHandler.shouldEnableDeleteAction(elements)
                 }
+
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
             }
+            sink.set(PlatformDataKeys.DELETE_ELEMENT_PROVIDER, deleteProvider)
         }
     }
 
