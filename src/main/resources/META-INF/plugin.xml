@@ -1,6 +1,6 @@
 <idea-plugin>
-    <id>engineering.cute.cutekit.clion</id>
-    <name>Cutekit Integration</name>
+    <id>engineering.cute.cutekit.integration</id>
+    <name>Cutekit</name>
     <vendor email="oss@cute.engineering" url="https://cute.engineering">Cute Engineering</vendor>
     <description><![CDATA[
         Adds the CuteKit Explorer tool window for browsing CuteKit projects and externs.
