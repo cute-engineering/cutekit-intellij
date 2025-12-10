@@ -2,12 +2,23 @@ package engineering.cute.cutekit.clion.toolwindow
 
 import com.intellij.icons.AllIcons
 import com.intellij.ide.CommonActionsManager
+import com.intellij.ide.CopyPasteDelegator
+import com.intellij.ide.DeleteProvider
 import com.intellij.ide.IdeView
 import com.intellij.ide.TreeExpander
-import com.intellij.ide.DeleteProvider
 import com.intellij.ide.util.DeleteHandler
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.actionSystem.DataSink
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.actionSystem.LangDataKeys
+import com.intellij.openapi.actionSystem.PlatformDataKeys
+import com.intellij.openapi.actionSystem.UiDataProvider
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -50,6 +61,7 @@ import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
+import kotlin.LazyThreadSafetyMode
 import kotlin.io.path.pathString
 
 class CutekitDependenciesToolWindowFactory : ToolWindowFactory {
@@ -63,9 +75,12 @@ class CutekitDependenciesToolWindowFactory : ToolWindowFactory {
 private class CutekitDependenciesPanel(private val project: Project) : Disposable {
     private val collector = CutekitDependencyCollector(project)
     private val treeModel = DefaultTreeModel(DefaultMutableTreeNode())
-    private val tree = object : Tree(treeModel), DataProvider {
-        override fun getData(dataId: String): Any? = this@CutekitDependenciesPanel.getData(dataId)
+    private val tree = object : Tree(treeModel), UiDataProvider {
+        override fun uiDataSnapshot(sink: DataSink) {
+            provideUiData(sink)
+        }
     }
+    private val copyPasteDelegator = CopyPasteDelegator(project, tree)
     private val connection: MessageBusConnection = project.messageBus.connect(this)
     @Volatile
     private var observedRootPaths: Set<String> = emptySet()
@@ -269,39 +284,40 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
         }
     }
 
-    private fun getData(dataId: String): Any? {
-        if (CommonDataKeys.PROJECT.`is`(dataId)) {
-            return project
-        }
+    private fun provideUiData(sink: DataSink) {
+        sink.set(CommonDataKeys.PROJECT, project)
 
         val selectedFiles = selectedVirtualFiles()
-        val selectedPsi = selectedPsiElements(selectedFiles)
-
-        if (CommonDataKeys.VIRTUAL_FILE_ARRAY.`is`(dataId)) {
-            return if (selectedFiles.isEmpty()) null else selectedFiles.toTypedArray()
-        }
-
-        if (CommonDataKeys.NAVIGATABLE_ARRAY.`is`(dataId)) {
+        if (selectedFiles.isNotEmpty()) {
+            sink.set(CommonDataKeys.VIRTUAL_FILE_ARRAY, selectedFiles.toTypedArray())
             val navigatables = selectedFiles
                 .filterNot { it.isDirectory }
                 .map { OpenFileDescriptor(project, it) }
-            return if (navigatables.isEmpty()) null else navigatables.toTypedArray()
-        }
-
-        if (LangDataKeys.PSI_ELEMENT.`is`(dataId)) {
-            return selectedPsi.firstOrNull()
-        }
-
-        if (LangDataKeys.PSI_ELEMENT_ARRAY.`is`(dataId)) {
-            return if (selectedPsi.isEmpty()) null else selectedPsi.toTypedArray()
-        }
-
-        if (LangDataKeys.IDE_VIEW.`is`(dataId)) {
-            val directories = buildTargetDirectories(selectedPsi)
-            if (directories.isEmpty()) {
-                return null
+            if (navigatables.isNotEmpty()) {
+                sink.set(CommonDataKeys.NAVIGATABLE_ARRAY, navigatables.toTypedArray())
+            } else {
+                sink.lazyNull(CommonDataKeys.NAVIGATABLE_ARRAY)
             }
-            return object : IdeView {
+        } else {
+            sink.lazyNull(CommonDataKeys.VIRTUAL_FILE_ARRAY)
+            sink.lazyNull(CommonDataKeys.NAVIGATABLE_ARRAY)
+        }
+
+        val psiElementsLazy = lazy(LazyThreadSafetyMode.NONE) { selectedPsiElements(selectedFiles) }
+
+        sink.lazy(LangDataKeys.PSI_ELEMENT_ARRAY) {
+            val psiElements = psiElementsLazy.value
+            if (psiElements.isEmpty()) null else psiElements.toTypedArray()
+        }
+
+        sink.lazy(LangDataKeys.PSI_ELEMENT) {
+            psiElementsLazy.value.firstOrNull()
+        }
+
+        sink.lazy(LangDataKeys.IDE_VIEW) {
+            val directories = buildTargetDirectories(psiElementsLazy.value)
+            if (directories.isEmpty()) return@lazy null
+            object : IdeView {
                 override fun getDirectories(): Array<PsiDirectory> = directories.toTypedArray()
 
                 override fun getOrChooseDirectory(): PsiDirectory? {
@@ -320,8 +336,12 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
             }
         }
 
-        if (PlatformDataKeys.DELETE_ELEMENT_PROVIDER.`is`(dataId)) {
-            return object : DeleteProvider {
+        sink.set(PlatformDataKeys.COPY_PROVIDER, copyPasteDelegator.copyProvider)
+        sink.set(PlatformDataKeys.CUT_PROVIDER, copyPasteDelegator.cutProvider)
+        sink.set(PlatformDataKeys.PASTE_PROVIDER, copyPasteDelegator.pasteProvider)
+
+        sink.lazy(PlatformDataKeys.DELETE_ELEMENT_PROVIDER) {
+            object : DeleteProvider {
                 override fun deleteElement(dataContext: DataContext) {
                     val elements = LangDataKeys.PSI_ELEMENT_ARRAY.getData(dataContext) ?: return
                     if (elements.isEmpty()) return
@@ -335,8 +355,6 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
                 }
             }
         }
-
-        return null
     }
 
     private fun selectedVirtualFiles(): List<VirtualFile> {
