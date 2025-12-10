@@ -106,7 +106,11 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
 
         object : DoubleClickListener() {
             override fun onDoubleClick(event: MouseEvent): Boolean {
-                val path = tree.getPathForLocation(event.x, event.y) ?: return false
+                val path = tree.getClosestPathForLocation(event.x, event.y) ?: return false
+                val row = tree.getRowForPath(path)
+                if (row < 0) return false
+                val bounds = tree.getRowBounds(row) ?: return false
+                if (event.y < bounds.y || event.y > bounds.y + bounds.height) return false
                 val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return false
                 val file = (node.userObject as? TreeItem.File)?.file ?: return false
                 if (file.isDirectory) {
