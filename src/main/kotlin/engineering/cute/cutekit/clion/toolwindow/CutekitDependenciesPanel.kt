@@ -2,6 +2,7 @@ package engineering.cute.cutekit.clion.toolwindow
 
 import com.intellij.icons.AllIcons
 import com.intellij.ide.CommonActionsManager
+import com.intellij.ide.IdeView
 import com.intellij.ide.TreeExpander
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.*
@@ -30,6 +31,10 @@ import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.IconUtil
 import com.intellij.util.messages.MessageBusConnection
 import com.intellij.util.ui.tree.TreeUtil
+import com.intellij.psi.PsiDirectory
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiManager
 import java.awt.BorderLayout
 import java.awt.event.MouseEvent
 import javax.swing.JComponent
@@ -246,19 +251,8 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
             return project
         }
 
-        val selectedNodes = tree.selectionPaths
-            ?.mapNotNull { it.lastPathComponent as? DefaultMutableTreeNode }
-            ?: emptyList()
-
-        val selectedFiles = selectedNodes
-            .mapNotNull { node ->
-                when (val item = node.userObject as? TreeItem) {
-                    is TreeItem.ProjectRoot -> item.file
-                    is TreeItem.Dependency -> item.root
-                    is TreeItem.File -> item.file
-                    else -> null
-                }
-            }
+        val selectedFiles = selectedVirtualFiles()
+        val selectedPsi = selectedPsiElements(selectedFiles)
 
         if (CommonDataKeys.VIRTUAL_FILE_ARRAY.`is`(dataId)) {
             return if (selectedFiles.isEmpty()) null else selectedFiles.toTypedArray()
@@ -271,7 +265,82 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
             return if (navigatables.isEmpty()) null else navigatables.toTypedArray()
         }
 
+        if (LangDataKeys.PSI_ELEMENT.`is`(dataId)) {
+            return selectedPsi.firstOrNull()
+        }
+
+        if (LangDataKeys.PSI_ELEMENT_ARRAY.`is`(dataId)) {
+            return if (selectedPsi.isEmpty()) null else selectedPsi.toTypedArray()
+        }
+
+        if (LangDataKeys.IDE_VIEW.`is`(dataId)) {
+            val directories = buildTargetDirectories(selectedPsi)
+            if (directories.isEmpty()) {
+                return null
+            }
+            return object : IdeView {
+                override fun getDirectories(): Array<PsiDirectory> = directories.toTypedArray()
+
+                override fun getOrChooseDirectory(): PsiDirectory? {
+                    val array = getDirectories()
+                    if (array.isEmpty()) return null
+                    return array.first()
+                }
+
+                override fun selectElement(element: PsiElement) {
+                    val vFile = when (element) {
+                        is PsiDirectory -> element.virtualFile
+                        else -> element.containingFile?.virtualFile
+                    } ?: return
+                    FileEditorManager.getInstance(project).openFile(vFile, true)
+                }
+            }
+        }
+
         return null
+    }
+
+    private fun selectedVirtualFiles(): List<VirtualFile> {
+        val selectedNodes = tree.selectionPaths
+            ?.mapNotNull { it.lastPathComponent as? DefaultMutableTreeNode }
+            ?: return emptyList()
+
+        return selectedNodes.mapNotNull { node ->
+            when (val item = node.userObject as? TreeItem) {
+                is TreeItem.ProjectRoot -> item.file
+                is TreeItem.Dependency -> item.root
+                is TreeItem.File -> item.file
+                else -> null
+            }
+        }.filter { it.isValid }.distinctBy { it.path }
+    }
+
+    private fun selectedPsiElements(files: List<VirtualFile>): List<PsiElement> {
+        if (files.isEmpty()) return emptyList()
+        return ReadAction.compute<List<PsiElement>, RuntimeException> {
+            val psiManager = PsiManager.getInstance(project)
+            files.mapNotNull { file ->
+                when {
+                    !file.isValid -> null
+                    file.isDirectory -> psiManager.findDirectory(file)
+                    else -> psiManager.findFile(file)
+                }
+            }
+        }
+    }
+
+    private fun buildTargetDirectories(elements: List<PsiElement>): List<PsiDirectory> {
+        if (elements.isEmpty()) return emptyList()
+        val directories = elements.mapNotNull { element ->
+            when (element) {
+                is PsiDirectory -> element
+                is PsiFile -> element.parent
+                else -> null
+            }
+        }
+        return directories
+            .filter { it.isValid }
+            .distinctBy { it.virtualFile.path }
     }
 }
 
