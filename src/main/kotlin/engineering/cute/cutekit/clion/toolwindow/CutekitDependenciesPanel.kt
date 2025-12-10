@@ -3,9 +3,10 @@ package engineering.cute.cutekit.clion.toolwindow
 import com.intellij.icons.AllIcons
 import com.intellij.ide.CommonActionsManager
 import com.intellij.ide.CopyPasteDelegator
+import com.intellij.ide.DeleteProvider
 import com.intellij.ide.IdeView
 import com.intellij.ide.TreeExpander
-import com.intellij.ide.DeleteProvider
+import com.intellij.ide.projectView.impl.ProjectViewSharedSettings
 import com.intellij.ide.util.DeleteHandler
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionGroup
@@ -26,7 +27,9 @@ import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.fileTypes.FileTypeRegistry
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.components.service
 import com.intellij.openapi.util.Iconable
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
@@ -40,6 +43,7 @@ import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.vcs.ProjectLevelVcsManager
 import com.intellij.openapi.vcs.VcsDirectoryMapping
+import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.DoubleClickListener
 import com.intellij.ui.SimpleTextAttributes
@@ -88,6 +92,9 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
         }
     }
     private val copyPasteDelegator = CopyPasteDelegator(project, tree)
+    private val projectFileIndex = ProjectRootManager.getInstance(project).fileIndex
+    private val fileTypeRegistry = FileTypeRegistry.getInstance()
+    private val projectViewSettings = service<ProjectViewSharedSettings>()
     private val connection: MessageBusConnection = project.messageBus.connect(this)
     @Volatile
     private var observedRootPaths: Set<String> = emptySet()
@@ -309,12 +316,20 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
 
         for (child in sorted) {
             if (!child.isValid) continue
+            if (shouldHideFromProjectView(child)) continue
             val node = DefaultMutableTreeNode(TreeItem.File(child))
             parent.add(node)
             if (child.isDirectory) {
                 buildVirtualFileChildren(node, child, visited)
             }
         }
+    }
+
+    private fun shouldHideFromProjectView(file: VirtualFile): Boolean {
+        if (!file.isValid) return true
+        if (fileTypeRegistry.isFileIgnored(file)) return true
+        if (!projectViewSettings.showExcludedFiles && projectFileIndex.isExcluded(file)) return true
+        return false
     }
 
     private fun provideUiData(sink: DataSink) {
