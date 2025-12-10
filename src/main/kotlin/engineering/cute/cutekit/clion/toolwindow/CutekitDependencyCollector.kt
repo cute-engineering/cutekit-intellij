@@ -41,7 +41,8 @@ class CutekitDependencyCollector(private val project: Project) {
                     extern.tag,
                     extern.commit,
                     extern.version,
-                    extern.origin.toString()
+                    extern.origin.toString(),
+                    extern.contentRoot?.toString()
                 ).joinToString("|")
                 if (seenDependencies.add(uniqueKey)) {
                     result.add(
@@ -53,6 +54,7 @@ class CutekitDependencyCollector(private val project: Project) {
                             commit = extern.commit,
                             version = extern.version,
                             names = extern.names,
+                            contentRoot = extern.contentRoot,
                         )
                     )
                 }
@@ -133,6 +135,7 @@ class CutekitDependencyCollector(private val project: Project) {
         val version: String?,
         val names: List<String>,
         val localProjectPaths: List<Path>,
+        val contentRoot: Path?,
     ) {
         companion object {
             fun fromJson(id: String, json: JSONObject, root: Path): ExternEntry {
@@ -154,6 +157,8 @@ class CutekitDependencyCollector(private val project: Project) {
                     }
                 }
 
+                val resolvedRoot = localCandidates.firstOrNull { it.exists() && it.isDirectory() }
+
                 return ExternEntry(
                     id = id,
                     origin = root,
@@ -162,7 +167,8 @@ class CutekitDependencyCollector(private val project: Project) {
                     commit = commit,
                     version = version,
                     names = names,
-                    localProjectPaths = localCandidates
+                    localProjectPaths = localCandidates,
+                    contentRoot = resolvedRoot
                 )
             }
         }

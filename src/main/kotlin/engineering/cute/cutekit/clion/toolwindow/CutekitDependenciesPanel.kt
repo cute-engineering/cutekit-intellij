@@ -1,25 +1,42 @@
 package engineering.cute.cutekit.clion.toolwindow
 
 import com.intellij.icons.AllIcons
+import com.intellij.ide.CommonActionsManager
+import com.intellij.ide.TreeExpander
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Iconable
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
-import com.intellij.ui.CollectionListModel
-import com.intellij.ui.ColoredListCellRenderer
+import com.intellij.ui.ColoredTreeCellRenderer
+import com.intellij.ui.DoubleClickListener
 import com.intellij.ui.SimpleTextAttributes
-import com.intellij.ui.components.JBList
+import com.intellij.ui.TreeSpeedSearch
 import com.intellij.ui.components.panels.NonOpaquePanel
 import com.intellij.ui.content.ContentFactory
+import com.intellij.ui.PopupHandler
+import com.intellij.ui.treeStructure.Tree
+import com.intellij.util.IconUtil
 import com.intellij.util.messages.MessageBusConnection
+import com.intellij.util.ui.tree.TreeUtil
+import java.awt.BorderLayout
+import java.awt.event.MouseEvent
 import javax.swing.JComponent
-import javax.swing.JList
 import javax.swing.JScrollPane
-import javax.swing.ListSelectionModel
+import javax.swing.tree.DefaultMutableTreeNode
+import javax.swing.tree.DefaultTreeModel
+import javax.swing.tree.TreeSelectionModel
 import kotlin.io.path.pathString
 
 class CutekitDependenciesToolWindowFactory : ToolWindowFactory {
@@ -32,8 +49,10 @@ class CutekitDependenciesToolWindowFactory : ToolWindowFactory {
 
 private class CutekitDependenciesPanel(private val project: Project) : Disposable {
     private val collector = CutekitDependencyCollector(project)
-    private val model = CollectionListModel<CutekitDependency>()
-    private val list = JBList(model)
+    private val treeModel = DefaultTreeModel(DefaultMutableTreeNode())
+    private val tree = object : Tree(treeModel), DataProvider {
+        override fun getData(dataId: String): Any? = this@CutekitDependenciesPanel.getData(dataId)
+    }
     private val connection: MessageBusConnection = project.messageBus.connect(this)
 
     val component: JComponent = buildUi()
@@ -44,45 +63,43 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
     }
 
     private fun buildUi(): JComponent {
-        list.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        list.cellRenderer = object : ColoredListCellRenderer<CutekitDependency>() {
-            override fun customizeCellRenderer(
-                list: JList<out CutekitDependency>,
-                value: CutekitDependency?,
-                index: Int,
-                selected: Boolean,
-                hasFocus: Boolean
-            ) {
-                value ?: return
-                append(value.id, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
-                val details = buildList {
-                    value.version?.let { add("version $it") }
-                    value.git?.let { add(it) }
-                    value.commit?.let { add(it.take(12)) }
-                }
-                if (details.isNotEmpty()) {
-                    append(" — ")
-                    append(details.joinToString(" | "))
-                }
-
-                val origin = value.origin.pathString
-                append("  (${origin})", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
-
-                if (value.names.isNotEmpty()) {
-                    append("  names: ${value.names.joinToString()}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                }
-            }
+        tree.isRootVisible = false
+        tree.showsRootHandles = true
+        tree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
+        tree.emptyText.text = "No CuteKit dependencies detected"
+        tree.cellRenderer = CutekitTreeCellRenderer()
+        TreeSpeedSearch(tree) { path ->
+            val item = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? TreeItem
+            item?.speedSearchText() ?: ""
         }
 
-        list.emptyText.text = "No CuteKit dependencies detected"
+        object : DoubleClickListener() {
+            override fun onDoubleClick(event: MouseEvent): Boolean {
+                val path = tree.getPathForLocation(event.x, event.y) ?: return false
+                val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return false
+                val file = (node.userObject as? TreeItem.File)?.file ?: return false
+                if (file.isDirectory) {
+                    return false
+                }
+                FileEditorManager.getInstance(project).openFile(file, true)
+                return true
+            }
+        }.installOn(tree)
 
-        val scrollPane = JScrollPane(list)
+        PopupHandler.installPopupHandler(
+            tree,
+            ActionManager.getInstance().getAction(IdeActions.GROUP_PROJECT_VIEW_POPUP) as ActionGroup,
+            ActionPlaces.UNKNOWN,
+            ActionManager.getInstance()
+        )
+
+        val scrollPane = JScrollPane(tree)
         val toolbar = buildToolbar()
 
         return NonOpaquePanel().apply {
-            layout = java.awt.BorderLayout()
-            add(toolbar, java.awt.BorderLayout.NORTH)
-            add(scrollPane, java.awt.BorderLayout.CENTER)
+            layout = BorderLayout()
+            add(toolbar, BorderLayout.NORTH)
+            add(scrollPane, BorderLayout.CENTER)
         }
     }
 
@@ -93,17 +110,35 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
             }
         }
 
-        val actionGroup = com.intellij.openapi.actionSystem.DefaultActionGroup(refreshAction)
-        val toolbar = com.intellij.openapi.actionSystem.ActionManager.getInstance()
+        val treeExpander = object : TreeExpander {
+            override fun expandAll() {
+                TreeUtil.expandAll(tree)
+            }
+
+            override fun canExpand(): Boolean = tree.rowCount > 0
+
+            override fun collapseAll() {
+                TreeUtil.collapseAll(tree, 0)
+            }
+
+            override fun canCollapse(): Boolean = tree.rowCount > 0
+        }
+
+        val commonActions = CommonActionsManager.getInstance()
+        val expandAll = commonActions.createExpandAllAction(treeExpander, tree)
+        val collapseAll = commonActions.createCollapseAllAction(treeExpander, tree)
+
+        val actionGroup = DefaultActionGroup(refreshAction, expandAll, collapseAll)
+        val toolbar = ActionManager.getInstance()
             .createActionToolbar("CutekitDependenciesToolbar", actionGroup, true)
-        toolbar.targetComponent = list
+        toolbar.targetComponent = tree
         return toolbar.component
     }
 
     private fun registerListeners() {
-        connection.subscribe(com.intellij.openapi.vfs.VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
+        connection.subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
             override fun after(events: MutableList<out VFileEvent>) {
-                if (events.any { it.file?.name in setOf("project", "project.lock") }) {
+                if (events.any(::shouldRefreshOnEvent)) {
                     refresh()
                 }
             }
@@ -111,23 +146,184 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
     }
 
     fun refresh() {
-        list.isEnabled = false
+        tree.isEnabled = false
+        tree.emptyText.text = "Loading Cutekit dependencies…"
         ApplicationManager.getApplication().executeOnPooledThread {
             val dependencies = collector.collect()
+            val rootNode = buildTree(dependencies)
             ApplicationManager.getApplication().invokeLater {
                 if (project.isDisposed) {
                     return@invokeLater
                 }
-                model.replaceAll(dependencies)
+                treeModel.setRoot(rootNode)
+                treeModel.reload()
                 if (dependencies.isEmpty()) {
-                    list.emptyText.text = "No CuteKit dependencies detected"
+                    tree.emptyText.text = "No CuteKit dependencies detected"
+                } else {
+                    tree.emptyText.clear()
+                    TreeUtil.expand(tree, 1)
                 }
-                list.isEnabled = true
+                tree.isEnabled = true
             }
         }
     }
 
     override fun dispose() {
         // Nothing to dispose beyond the message bus connection handled by connect(this)
+    }
+
+    private fun shouldRefreshOnEvent(event: VFileEvent): Boolean {
+        val file = event.file ?: return false
+        if (file.name == "project" || file.name == "project.lock") {
+            return true
+        }
+        val path = file.path
+        return path.contains("/.cutekit/extern/")
+    }
+
+    private fun buildTree(dependencies: List<CutekitDependency>): DefaultMutableTreeNode {
+        val root = DefaultMutableTreeNode()
+        if (dependencies.isEmpty()) {
+            return root
+        }
+
+        val localFileSystem = LocalFileSystem.getInstance()
+
+        ReadAction.run<RuntimeException> {
+            dependencies.sortedWith(compareBy({ it.id.lowercase() }, { it.origin.pathString }))
+                .forEach { dependency ->
+                    val virtualRoot = dependency.contentRoot?.let { localFileSystem.refreshAndFindFileByNioFile(it) }
+                    val dependencyNode = DefaultMutableTreeNode(TreeItem.Dependency(dependency, virtualRoot))
+                    if (virtualRoot != null && virtualRoot.isValid) {
+                        buildVirtualFileChildren(dependencyNode, virtualRoot, mutableSetOf<String>())
+                    } else {
+                        dependencyNode.add(DefaultMutableTreeNode(TreeItem.Message("No local checkout found")))
+                    }
+                    root.add(dependencyNode)
+                }
+        }
+
+        return root
+    }
+
+    private fun buildVirtualFileChildren(
+        parent: DefaultMutableTreeNode,
+        directory: VirtualFile,
+        visited: MutableSet<String>
+    ) {
+        val key = directory.canonicalPath ?: directory.path
+        if (!visited.add(key)) {
+            return
+        }
+
+        val children = directory.children ?: return
+        val sorted = children.sortedWith(
+            compareBy<VirtualFile> { !it.isDirectory }
+                .thenBy { it.name.lowercase() }
+        )
+
+        for (child in sorted) {
+            if (!child.isValid) continue
+            val node = DefaultMutableTreeNode(TreeItem.File(child))
+            parent.add(node)
+            if (child.isDirectory) {
+                buildVirtualFileChildren(node, child, visited)
+            }
+        }
+    }
+
+    private fun getData(dataId: String): Any? {
+        if (CommonDataKeys.PROJECT.`is`(dataId)) {
+            return project
+        }
+
+        val selectedNodes = tree.selectionPaths
+            ?.mapNotNull { it.lastPathComponent as? DefaultMutableTreeNode }
+            ?: emptyList()
+
+        val selectedFiles = selectedNodes
+            .mapNotNull { node ->
+                when (val item = node.userObject as? TreeItem) {
+                    is TreeItem.Dependency -> item.root
+                    is TreeItem.File -> item.file
+                    else -> null
+                }
+            }
+
+        if (CommonDataKeys.VIRTUAL_FILE_ARRAY.`is`(dataId)) {
+            return if (selectedFiles.isEmpty()) null else selectedFiles.toTypedArray()
+        }
+
+        if (CommonDataKeys.NAVIGATABLE_ARRAY.`is`(dataId)) {
+            val navigatables = selectedFiles
+                .filterNot { it.isDirectory }
+                .map { OpenFileDescriptor(project, it) }
+            return if (navigatables.isEmpty()) null else navigatables.toTypedArray()
+        }
+
+        return null
+    }
+}
+
+private sealed interface TreeItem {
+    fun speedSearchText(): String
+
+    data class Dependency(val dependency: CutekitDependency, val root: VirtualFile?) : TreeItem {
+        override fun speedSearchText(): String = dependency.id
+    }
+
+    data class File(val file: VirtualFile) : TreeItem {
+        override fun speedSearchText(): String = file.name
+    }
+
+    data class Message(val text: String) : TreeItem {
+        override fun speedSearchText(): String = text
+    }
+}
+
+private class CutekitTreeCellRenderer : ColoredTreeCellRenderer() {
+    override fun customizeCellRenderer(
+        tree: javax.swing.JTree,
+        value: Any?,
+        selected: Boolean,
+        expanded: Boolean,
+        leaf: Boolean,
+        row: Int,
+        hasFocus: Boolean
+    ) {
+        val node = value as? DefaultMutableTreeNode ?: return
+        when (val item = node.userObject as? TreeItem) {
+            is TreeItem.Dependency -> {
+                icon = AllIcons.Nodes.Module
+                append(item.dependency.id, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+                val extra = buildList {
+                    item.dependency.version?.let { add("version $it") }
+                    item.dependency.git?.let { add(it) }
+                    item.dependency.commit?.takeIf { it.isNotBlank() }?.let { add(it.take(12)) }
+                }
+                if (extra.isNotEmpty()) {
+                    append(" — ")
+                    append(extra.joinToString(" | "))
+                }
+                append("  (${item.dependency.origin.pathString})", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+                if (item.dependency.names.isNotEmpty()) {
+                    append("  names: ${item.dependency.names.joinToString()}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                }
+            }
+
+            is TreeItem.File -> {
+                icon = IconUtil.getIcon(item.file, Iconable.ICON_FLAG_READ_STATUS, null)
+                append(item.file.name)
+            }
+
+            is TreeItem.Message -> {
+                icon = AllIcons.General.BalloonWarning
+                append(item.text, SimpleTextAttributes.GRAYED_ATTRIBUTES)
+            }
+
+            else -> {
+                append(value?.toString() ?: "")
+            }
+        }
     }
 }

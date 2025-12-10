@@ -3,7 +3,7 @@
     <name>CuteKit Dependency Browser</name>
     <vendor email="oss@cute.engineering" url="https://cute.engineering">Cute Engineering</vendor>
     <description><![CDATA[
-        Provides a tool window in CLion that lists all external CuteKit dependencies discovered in the project.
+        Provides a tool window in CLion that visualizes CuteKit externs as a browsable directory tree, with full access to standard file actions.
     ]]></description>
 
     <depends>com.intellij.modules.clion</depends>

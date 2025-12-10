@@ -1,10 +1,11 @@
 # CuteKit CLion Plugin
 
-A CLion/IntelliJ Platform plugin that surfaces a flattened view of CuteKit extern dependencies inside a dedicated tool window. The plugin discovers CuteKit projects by looking for `project` and `project.lock` manifests and walks through nested extern directories to present a consolidated list of dependencies declared across the workspace.
+A CLion/IntelliJ Platform plugin that surfaces CuteKit extern dependencies inside a dedicated tool window. The plugin discovers CuteKit projects by looking for `project` and `project.lock` manifests and walks through nested extern directories to present a consolidated tree of dependencies declared across the workspace.
 
 ## Features
 
 - Tool window (**CuteKit Dependencies**) docked to the right side of the IDE.
+- Directory tree for each extern, exposing the full file hierarchy with native CLion actions (open, navigation, refactors, etc.).
 - On-demand refresh plus automatic updates when CuteKit manifests change.
 - Displays extern identifiers along with git metadata, resolved commit, version, and host package aliases.
 

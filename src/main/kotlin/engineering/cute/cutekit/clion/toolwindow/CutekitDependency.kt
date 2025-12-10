@@ -13,4 +13,5 @@ data class CutekitDependency(
     val commit: String?,
     val version: String?,
     val names: List<String>,
+    val contentRoot: Path?,
 )
