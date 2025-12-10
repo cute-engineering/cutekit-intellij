@@ -1,16 +1,16 @@
 <idea-plugin>
     <id>engineering.cute.cutekit.clion</id>
-    <name>CuteKit Dependency Browser</name>
+    <name>Cutekit Integration</name>
     <vendor email="oss@cute.engineering" url="https://cute.engineering">Cute Engineering</vendor>
     <description><![CDATA[
-        Provides a tool window in CLion that visualizes CuteKit externs as a browsable directory tree, with full access to standard file actions.
+        Provides the CuteKit Explorer tool window in CLion to visualize CuteKit externs alongside the project tree, with full access to standard file actions.
     ]]></description>
 
     <depends>com.intellij.modules.clion</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow
-            id="CuteKit Dependencies"
+            id="CuteKit Explorer"
             anchor="right"
             factoryClass="engineering.cute.cutekit.clion.toolwindow.CutekitDependenciesToolWindowFactory"
             canCloseContents="false"
