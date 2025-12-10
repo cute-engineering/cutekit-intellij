@@ -4,6 +4,8 @@ import com.intellij.icons.AllIcons
 import com.intellij.ide.CommonActionsManager
 import com.intellij.ide.IdeView
 import com.intellij.ide.TreeExpander
+import com.intellij.ide.DeleteProvider
+import com.intellij.ide.util.DeleteHandler
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.application.ApplicationManager
@@ -42,6 +44,7 @@ import javax.swing.JScrollPane
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreeSelectionModel
+import javax.swing.tree.TreePath
 import kotlin.io.path.pathString
 
 class CutekitDependenciesToolWindowFactory : ToolWindowFactory {
@@ -151,6 +154,7 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
     }
 
     fun refresh() {
+        val previousState = captureTreeState()
         tree.isEnabled = false
         tree.emptyText.text = "Loading Cutekit dependencies…"
         ApplicationManager.getApplication().executeOnPooledThread {
@@ -166,6 +170,10 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
                     tree.emptyText.text = "No CuteKit dependencies detected"
                 } else {
                     tree.emptyText.clear()
+                }
+
+                restoreTreeState(previousState)
+                if (previousState.expandedKeys.isEmpty()) {
                     TreeUtil.expand(tree, 1)
                 }
                 tree.isEnabled = true
@@ -297,6 +305,22 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
             }
         }
 
+        if (PlatformDataKeys.DELETE_ELEMENT_PROVIDER.`is`(dataId)) {
+            return object : DeleteProvider {
+                override fun deleteElement(dataContext: DataContext) {
+                    val elements = LangDataKeys.PSI_ELEMENT_ARRAY.getData(dataContext) ?: return
+                    if (elements.isEmpty()) return
+                    if (!DeleteHandler.shouldEnableDeleteAction(elements)) return
+                    DeleteHandler.deletePsiElement(elements, project)
+                }
+
+                override fun canDeleteElement(dataContext: DataContext): Boolean {
+                    val elements = LangDataKeys.PSI_ELEMENT_ARRAY.getData(dataContext)
+                    return elements != null && elements.isNotEmpty() && DeleteHandler.shouldEnableDeleteAction(elements)
+                }
+            }
+        }
+
         return null
     }
 
@@ -342,25 +366,103 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
             .filter { it.isValid }
             .distinctBy { it.virtualFile.path }
     }
+
+    private fun captureTreeState(): TreeState {
+        val expandedKeys = TreeUtil.collectExpandedPaths(tree)
+            .mapNotNull { treePathKey(it) }
+            .toSet()
+        val selectedKeys = tree.selectionPaths
+            ?.mapNotNull { treePathKey(it) }
+            ?.toSet()
+            ?: emptySet()
+        return TreeState(expandedKeys, selectedKeys)
+    }
+
+    private fun restoreTreeState(state: TreeState) {
+        val rootNode = tree.model.root as? DefaultMutableTreeNode ?: return
+        if (state.isEmpty()) {
+            tree.selectionModel.clearSelection()
+            return
+        }
+
+        val selectionPaths = mutableListOf<TreePath>()
+        traverseTree(rootNode) { node ->
+            val path = TreeUtil.getPath(rootNode, node)
+            val key = treePathKey(path) ?: return@traverseTree
+            if (state.expandedKeys.contains(key)) {
+                tree.expandPath(path)
+            }
+            if (state.selectedKeys.contains(key)) {
+                selectionPaths += path
+            }
+        }
+
+        if (selectionPaths.isNotEmpty()) {
+            tree.selectionPaths = selectionPaths.toTypedArray()
+        } else {
+            tree.selectionModel.clearSelection()
+        }
+    }
+
+    private fun traverseTree(node: DefaultMutableTreeNode, action: (DefaultMutableTreeNode) -> Unit) {
+        action(node)
+        val children = node.children()
+        while (children.hasMoreElements()) {
+            traverseTree(children.nextElement() as DefaultMutableTreeNode, action)
+        }
+    }
+
+    private fun treePathKey(path: TreePath?): String? {
+        if (path == null) return null
+        val keys = path.path
+            .mapNotNull { element ->
+                val node = element as? DefaultMutableTreeNode ?: return@mapNotNull null
+                nodeKey(node)
+            }
+        if (keys.isEmpty()) return null
+        return keys.joinToString("|")
+    }
+
+    private fun nodeKey(node: DefaultMutableTreeNode): String? {
+        val item = node.userObject as? TreeItem ?: return null
+        return item.keySegment()
+    }
+
+    private data class TreeState(
+        val expandedKeys: Set<String>,
+        val selectedKeys: Set<String>
+    ) {
+        fun isEmpty(): Boolean = expandedKeys.isEmpty() && selectedKeys.isEmpty()
+    }
 }
 
 private sealed interface TreeItem {
     fun speedSearchText(): String
+    fun keySegment(): String
 
     data class ProjectRoot(val file: VirtualFile) : TreeItem {
         override fun speedSearchText(): String = file.name
+        override fun keySegment(): String = "project:${file.path}"
     }
 
     data class Dependency(val dependency: CutekitDependency, val root: VirtualFile?) : TreeItem {
         override fun speedSearchText(): String = dependency.id
+        override fun keySegment(): String = buildString {
+            append("dependency:")
+            append(dependency.id)
+            append(':')
+            append(dependency.origin.pathString)
+        }
     }
 
     data class File(val file: VirtualFile) : TreeItem {
         override fun speedSearchText(): String = file.name
+        override fun keySegment(): String = "file:${file.path}"
     }
 
     data class Message(val text: String) : TreeItem {
         override fun speedSearchText(): String = text
+        override fun keySegment(): String = "message:$text"
     }
 }
 
