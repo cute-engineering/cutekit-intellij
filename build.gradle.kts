@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "engineering.cute"
-version = "0.1.1"
+version = "0.1.2"
 
 kotlin {
     jvmToolchain(21)
@@ -34,6 +34,7 @@ dependencies {
     intellijPlatform {
         clion("2025.3")
         bundledPlugin("com.intellij.clion")
+        bundledPlugin("org.jetbrains.plugins.terminal")
     }
 }
 
