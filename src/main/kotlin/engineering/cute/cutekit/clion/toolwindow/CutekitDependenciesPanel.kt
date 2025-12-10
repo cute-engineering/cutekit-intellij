@@ -23,6 +23,8 @@ import com.intellij.openapi.actionSystem.UiDataProvider
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
@@ -63,6 +65,7 @@ import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
 import kotlin.LazyThreadSafetyMode
+import kotlin.collections.ArrayDeque
 import kotlin.io.path.pathString
 
 class CutekitDependenciesToolWindowFactory : ToolWindowFactory {
@@ -85,12 +88,19 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
     private val connection: MessageBusConnection = project.messageBus.connect(this)
     @Volatile
     private var observedRootPaths: Set<String> = emptySet()
+    @Volatile
+    private var pendingSelectionPath: String? = null
 
     val component: JComponent = buildUi()
 
     init {
         registerListeners()
         refresh()
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            selectCurrentEditorFile()
+            applyPendingSelection()
+        }
     }
 
     private fun buildUi(): JComponent {
@@ -178,6 +188,16 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
                 }
             }
         })
+
+        connection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
+            override fun selectionChanged(event: FileEditorManagerEvent) {
+                selectFileInTreeLater(event.newFile)
+            }
+
+            override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
+                selectFileInTreeLater(file)
+            }
+        })
     }
 
     fun refresh() {
@@ -205,6 +225,8 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
                     TreeUtil.expand(tree, 1)
                 }
                 tree.isEnabled = true
+                selectCurrentEditorFile()
+                applyPendingSelection()
             }
         }
     }
@@ -396,6 +418,93 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
                 }
             }
         }
+    }
+
+    private fun selectFileInTreeLater(file: VirtualFile?) {
+        if (file == null || !file.isValid) return
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            selectFileInTree(file)
+            applyPendingSelection()
+        }
+    }
+
+    private fun selectFileInTree(file: VirtualFile) {
+        if (!file.isValid) return
+        val normalized = normalizePathOrNull(file.path) ?: return
+        if (normalized == currentSelectionNormalizedPath()) {
+            pendingSelectionPath = null
+            return
+        }
+
+        if (applySelectionForPath(normalized)) {
+            pendingSelectionPath = null
+        } else {
+            pendingSelectionPath = normalized
+        }
+    }
+
+    private fun selectCurrentEditorFile() {
+        val file = FileEditorManager.getInstance(project).selectedFiles.lastOrNull()
+        if (file != null) {
+            selectFileInTree(file)
+        }
+    }
+
+    private fun applyPendingSelection() {
+        val normalized = pendingSelectionPath ?: return
+        if (applySelectionForPath(normalized)) {
+            pendingSelectionPath = null
+        }
+    }
+
+    private fun applySelectionForPath(normalizedPath: String): Boolean {
+        val current = currentSelectionNormalizedPath()
+        if (current != null && current == normalizedPath) {
+            return true
+        }
+
+        val rootNode = tree.model.root as? DefaultMutableTreeNode ?: return false
+        val targetPath = findTreePathForNormalizedPath(rootNode, normalizedPath) ?: return false
+        TreeUtil.selectPath(tree, targetPath)
+        tree.scrollPathToVisible(targetPath)
+        return true
+    }
+
+    private fun findTreePathForNormalizedPath(
+        rootNode: DefaultMutableTreeNode,
+        normalizedPath: String
+    ): TreePath? {
+        val queue = ArrayDeque<TreePath>()
+        queue.add(TreePath(rootNode))
+        while (queue.isNotEmpty()) {
+            val currentPath = queue.removeFirst()
+            val node = currentPath.lastPathComponent as? DefaultMutableTreeNode ?: continue
+            val item = node.userObject as? TreeItem
+            val itemPath = item?.let { normalizedPathForItem(it) }
+            if (itemPath != null && itemPath == normalizedPath) {
+                return currentPath
+            }
+
+            val children = node.children()
+            while (children.hasMoreElements()) {
+                val child = children.nextElement() as DefaultMutableTreeNode
+                queue.add(currentPath.pathByAddingChild(child))
+            }
+        }
+        return null
+    }
+
+    private fun normalizedPathForItem(item: TreeItem): String? = when (item) {
+        is TreeItem.ProjectRoot -> normalizePathOrNull(item.file.path)
+        is TreeItem.File -> normalizePathOrNull(item.file.path)
+        else -> null
+    }
+
+    private fun currentSelectionNormalizedPath(): String? {
+        val node = tree.selectionPath?.lastPathComponent as? DefaultMutableTreeNode ?: return null
+        val item = node.userObject as? TreeItem ?: return null
+        return normalizedPathForItem(item)
     }
 
     private fun buildTargetDirectories(elements: List<PsiElement>): List<PsiDirectory> {
