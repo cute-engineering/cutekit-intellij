@@ -3,15 +3,14 @@ package engineering.cute.cutekit.clion.toolwindow
 import com.intellij.icons.AllIcons
 import com.intellij.ide.CommonActionsManager
 import com.intellij.ide.CopyPasteDelegator
-import com.intellij.ide.DeleteProvider
 import com.intellij.ide.IdeView
 import com.intellij.ide.TreeExpander
+import com.intellij.ide.DeleteProvider
 import com.intellij.ide.util.DeleteHandler
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
-import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.DataSink
@@ -383,16 +382,13 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
                 override fun deleteElement(dataContext: DataContext) {
                     val elements = psiElementsLazy.value
                     if (elements.isEmpty()) return
-                    if (!DeleteHandler.shouldEnableDeleteAction(elements)) return
                     DeleteHandler.deletePsiElement(elements, project)
                 }
 
                 override fun canDeleteElement(dataContext: DataContext): Boolean {
                     val elements = psiElementsLazy.value
-                    return elements.isNotEmpty() && DeleteHandler.shouldEnableDeleteAction(elements)
+                    return elements.isNotEmpty()
                 }
-
-                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
             }
             sink.set(PlatformDataKeys.DELETE_ELEMENT_PROVIDER, deleteProvider)
         }
