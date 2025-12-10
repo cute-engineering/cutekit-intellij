@@ -1,0 +1,19 @@
+<idea-plugin>
+    <id>engineering.cute.cutekit.clion</id>
+    <name>CuteKit Dependency Browser</name>
+    <vendor email="oss@cute.engineering" url="https://cute.engineering">Cute Engineering</vendor>
+    <description><![CDATA[
+        Provides a tool window in CLion that lists all external CuteKit dependencies discovered in the project.
+    ]]></description>
+
+    <depends>com.intellij.modules.clion</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+            id="CuteKit Dependencies"
+            anchor="right"
+            factoryClass="engineering.cute.cutekit.clion.toolwindow.CutekitDependenciesToolWindowFactory"
+            canCloseContents="false"
+        />
+    </extensions>
+</idea-plugin>
