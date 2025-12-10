@@ -190,6 +190,15 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
         val localFileSystem = LocalFileSystem.getInstance()
 
         ReadAction.run<RuntimeException> {
+            project.basePath
+                ?.let { LocalFileSystem.getInstance().refreshAndFindFileByPath(it) }
+                ?.takeIf { it.isValid }
+                ?.let { projectRoot ->
+                    val projectNode = DefaultMutableTreeNode(TreeItem.ProjectRoot(projectRoot))
+                    buildVirtualFileChildren(projectNode, projectRoot, mutableSetOf<String>())
+                    root.add(projectNode)
+                }
+
             dependencies.sortedWith(compareBy({ it.id.lowercase() }, { it.origin.pathString }))
                 .forEach { dependency ->
                     val virtualRoot = dependency.contentRoot?.let { localFileSystem.refreshAndFindFileByNioFile(it) }
@@ -244,6 +253,7 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
         val selectedFiles = selectedNodes
             .mapNotNull { node ->
                 when (val item = node.userObject as? TreeItem) {
+                    is TreeItem.ProjectRoot -> item.file
                     is TreeItem.Dependency -> item.root
                     is TreeItem.File -> item.file
                     else -> null
@@ -267,6 +277,10 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
 
 private sealed interface TreeItem {
     fun speedSearchText(): String
+
+    data class ProjectRoot(val file: VirtualFile) : TreeItem {
+        override fun speedSearchText(): String = file.name
+    }
 
     data class Dependency(val dependency: CutekitDependency, val root: VirtualFile?) : TreeItem {
         override fun speedSearchText(): String = dependency.id
@@ -293,6 +307,11 @@ private class CutekitTreeCellRenderer : ColoredTreeCellRenderer() {
     ) {
         val node = value as? DefaultMutableTreeNode ?: return
         when (val item = node.userObject as? TreeItem) {
+            is TreeItem.ProjectRoot -> {
+                icon = AllIcons.Nodes.Project
+                append(item.file.name, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+            }
+
             is TreeItem.Dependency -> {
                 icon = AllIcons.Nodes.Module
                 append(item.dependency.id, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)

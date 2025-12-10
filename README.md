@@ -5,7 +5,7 @@ A CLion/IntelliJ Platform plugin that surfaces CuteKit extern dependencies insid
 ## Features
 
 - Tool window (**CuteKit Dependencies**) docked to the right side of the IDE.
-- Directory tree for each extern, exposing the full file hierarchy with native CLion actions (open, navigation, refactors, etc.).
+- Directory tree spanning the project root and each extern, exposing full file hierarchies with native CLion actions (open, navigation, refactors, etc.).
 - On-demand refresh plus automatic updates when CuteKit manifests change.
 - Clean presentation that focuses on extern identifiers while keeping the tree easy to scan.
 
