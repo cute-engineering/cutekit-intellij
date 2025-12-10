@@ -22,7 +22,8 @@
             id="engineering.cute.cutekit.clion.actions.CutekitNewComponentAction"
             class="engineering.cute.cutekit.clion.actions.CutekitNewComponentAction"
             text="CuteKit Component"
-            description="Create a new CuteKit component">
+            description="Create a new CuteKit component"
+            icon="icons/cutekitComponent.svg">
             <add-to-group group-id="NewGroup" anchor="last" />
         </action>
     </actions>

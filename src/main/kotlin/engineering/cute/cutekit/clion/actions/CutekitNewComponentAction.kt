@@ -14,6 +14,7 @@ import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
+import java.awt.Dimension
 import javax.swing.DefaultComboBoxModel
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -56,7 +57,7 @@ class CutekitNewComponentAction : AnAction("CuteKit Component"), DumbAware {
                     ?: error("Failed to create directory '$componentName'.")
 
                 createManifest(componentDir, options)
-                createSources(componentDir, options.language)
+                createSources(componentDir, options)
                 componentDir.refresh(false, true)
             })
         }
@@ -79,17 +80,21 @@ class CutekitNewComponentAction : AnAction("CuteKit Component"), DumbAware {
         VfsUtil.saveText(manifestFile, manifestContent)
     }
 
-    private fun createSources(componentDir: VirtualFile, language: ComponentLanguage) {
-        when (language) {
+    private fun createSources(componentDir: VirtualFile, options: CutekitNewComponentDialog.Options) {
+        when (options.language) {
             ComponentLanguage.C -> {
                 createEmptyFile(componentDir, "mod.c")
-                createEmptyFile(componentDir, "main.c")
                 createEmptyFile(componentDir, "mod.h")
+                if (options.type == ComponentType.EXE) {
+                    createEmptyFile(componentDir, "main.c")
+                }
             }
 
             ComponentLanguage.CPP -> {
                 createEmptyFile(componentDir, "mod.cpp")
-                createEmptyFile(componentDir, "main.cpp")
+                if (options.type == ComponentType.EXE) {
+                    createEmptyFile(componentDir, "main.cpp")
+                }
             }
         }
     }
@@ -100,7 +105,7 @@ class CutekitNewComponentAction : AnAction("CuteKit Component"), DumbAware {
     }
 
     private companion object {
-        const val MANIFEST_FILE_NAME = "component.cutekit.json"
+        const val MANIFEST_FILE_NAME = "manifest.json"
         const val DIALOG_TITLE = "Create CuteKit Component"
     }
 }
@@ -130,6 +135,8 @@ private class CutekitNewComponentDialog(project: Project) : DialogWrapper(projec
             .addLabeledComponent("Language", languageBox)
             .panel
     }
+
+    override fun getInitialSize(): Dimension = Dimension(420, 220)
 
     override fun getPreferredFocusedComponent(): JComponent = idField
 
