@@ -16,4 +16,14 @@
             canCloseContents="false"
         />
     </extensions>
+
+    <actions>
+        <action
+            id="engineering.cute.cutekit.clion.actions.CutekitNewComponentAction"
+            class="engineering.cute.cutekit.clion.actions.CutekitNewComponentAction"
+            text="CuteKit Component"
+            description="Create a new CuteKit component">
+            <add-to-group group-id="NewGroup" anchor="last" />
+        </action>
+    </actions>
 </idea-plugin>
