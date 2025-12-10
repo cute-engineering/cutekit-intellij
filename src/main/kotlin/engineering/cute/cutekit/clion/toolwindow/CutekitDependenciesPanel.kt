@@ -39,6 +39,8 @@ import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent
 import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
+import com.intellij.openapi.vcs.ProjectLevelVcsManager
+import com.intellij.openapi.vcs.VcsDirectoryMapping
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.DoubleClickListener
 import com.intellij.ui.SimpleTextAttributes
@@ -68,6 +70,8 @@ import kotlin.LazyThreadSafetyMode
 import kotlin.collections.ArrayDeque
 import kotlin.io.path.pathString
 
+private const val GIT_VCS_NAME = "Git"
+
 class CutekitDependenciesToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val panel = CutekitDependenciesPanel(project)
@@ -90,6 +94,8 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
     private var observedRootPaths: Set<String> = emptySet()
     @Volatile
     private var pendingSelectionPath: String? = null
+    @Volatile
+    private var registeredGitRoots: Set<String> = emptySet()
 
     val component: JComponent = buildUi()
 
@@ -220,6 +226,7 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
                 }
 
                 observedRootPaths = computeObservedRootPaths(dependencies)
+                updateGitMappings(dependencies)
                 restoreTreeState(previousState)
                 if (previousState.expandedKeys.isEmpty()) {
                     TreeUtil.expand(tree, 1)
@@ -602,6 +609,58 @@ private class CutekitDependenciesPanel(private val project: Project) : Disposabl
         }
 
         return roots
+    }
+
+    private fun updateGitMappings(dependencies: List<CutekitDependency>) {
+        val vcsManager = ProjectLevelVcsManager.getInstance(project)
+        if (vcsManager.findVcsByName(GIT_VCS_NAME) == null) {
+            return
+        }
+
+        val desiredRoots = dependencies.mapNotNull { dependency ->
+            dependency.contentRoot
+                ?.toAbsolutePath()
+                ?.normalize()
+                ?.toString()
+                ?.let(::normalizePathOrNull)
+        }.toSet()
+
+        val basePath = project.basePath?.let(::normalizePathOrNull)
+        val filteredDesired = desiredRoots.filterNot { it == basePath }.toSet()
+
+        val existingMappings = vcsManager.directoryMappings.toMutableList()
+        val existingByPath = existingMappings.associateBy { mapping ->
+            normalizePathOrNull(mapping.directory)
+        }
+
+        val newManagedRoots = registeredGitRoots.toMutableSet()
+
+        val rootsToRemove = registeredGitRoots - filteredDesired
+        if (rootsToRemove.isNotEmpty()) {
+            existingMappings.removeIf { mapping ->
+                val path = normalizePathOrNull(mapping.directory)
+                path != null && rootsToRemove.contains(path) && mapping.vcs == GIT_VCS_NAME
+            }
+            newManagedRoots.removeAll(rootsToRemove)
+        }
+
+        val rootsToAdd = filteredDesired.filter { normalized ->
+            val mapping = existingByPath[normalized]
+            mapping == null || mapping.vcs != GIT_VCS_NAME
+        }
+
+        if (rootsToAdd.isEmpty() && rootsToRemove.isEmpty()) {
+            registeredGitRoots = newManagedRoots
+            return
+        }
+
+        rootsToAdd.forEach { path ->
+            existingMappings.add(VcsDirectoryMapping(path, GIT_VCS_NAME))
+            newManagedRoots.add(path)
+        }
+
+        vcsManager.directoryMappings = existingMappings
+        registeredGitRoots = newManagedRoots
     }
 
     private fun collectCandidatePaths(event: VFileEvent): Set<String> {
