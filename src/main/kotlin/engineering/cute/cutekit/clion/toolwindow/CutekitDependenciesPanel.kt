@@ -296,19 +296,6 @@ private class CutekitTreeCellRenderer : ColoredTreeCellRenderer() {
             is TreeItem.Dependency -> {
                 icon = AllIcons.Nodes.Module
                 append(item.dependency.id, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
-                val extra = buildList {
-                    item.dependency.version?.let { add("version $it") }
-                    item.dependency.git?.let { add(it) }
-                    item.dependency.commit?.takeIf { it.isNotBlank() }?.let { add(it.take(12)) }
-                }
-                if (extra.isNotEmpty()) {
-                    append(" — ")
-                    append(extra.joinToString(" | "))
-                }
-                append("  (${item.dependency.origin.pathString})", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
-                if (item.dependency.names.isNotEmpty()) {
-                    append("  names: ${item.dependency.names.joinToString()}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                }
             }
 
             is TreeItem.File -> {
