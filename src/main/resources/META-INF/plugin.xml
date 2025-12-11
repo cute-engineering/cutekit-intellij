@@ -15,6 +15,7 @@
             anchor="right"
             factoryClass="engineering.cute.cutekit.clion.toolwindow.CutekitDependenciesToolWindowFactory"
             canCloseContents="false"
+            icon="icons/cutekitHelmet.svg"
         />
         <notificationGroup
             id="Cutekit"
